@@ -29,9 +29,7 @@ button { color: inherit; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 code { color: #d8b4fe; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9em; }
 
-.site-shell { position: relative; isolation: isolate; width: min(100% - 40px, 1180px); min-height: 100vh; margin: 0 auto; opacity: 1; transform: scale(1); transform-origin: center 42%; transition: filter .46s cubic-bezier(.22,1,.36,1), opacity .46s ease, transform .46s cubic-bezier(.22,1,.36,1); }
-.site-shell--welcome { filter: blur(4px) saturate(.82); opacity: .74; transform: scale(.99); }
-.site-shell--leaving { filter: blur(2px) saturate(.94); opacity: .84; transform: scale(.995); }
+.site-shell { position: relative; isolation: isolate; width: min(100% - 40px, 1180px); min-height: 100vh; margin: 0 auto; }
 .ambient-background { position: fixed; z-index: -2; inset: 0; overflow: hidden; pointer-events: none; }
 .ambient-background::before {
   position: absolute;
