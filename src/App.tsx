@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
 import { AuthPanel } from './components/AuthPanel';
 import { DirectoryList } from './components/DirectoryList';
+import { StatusToast } from './components/StatusToast';
 import { UploadPanel } from './components/UploadPanel';
+import { WelcomeGate } from './components/WelcomeGate';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { fetchDirectory, fetchFolderChain } from './services/directoryService';
 import type { DirectoryContents, FolderRecord } from './types';
 
 const emptyContents: DirectoryContents = { folders: [], files: [] };
 const folderIdFromUrl = () => new URLSearchParams(window.location.search).get('folder');
+type EntryState = 'welcome' | 'leaving' | 'entered';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -17,16 +20,26 @@ export default function App() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(folderIdFromUrl);
   const [folderChain, setFolderChain] = useState<FolderRecord[]>([]);
   const [contents, setContents] = useState<DirectoryContents>(emptyContents);
-  const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [entryState, setEntryState] = useState<EntryState>('welcome');
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [notificationVisible, setNotificationVisible] = useState(false);
+  const entryTimerRef = useRef<number | null>(null);
+  const firstLoadRef = useRef(true);
 
   const currentFolder = folderChain.at(-1) ?? null;
   const canAddHere = Boolean(session?.user && (!currentFolder || currentFolder.owner_id === session.user.id));
 
   const refresh = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
+    const startedAt = performance.now();
+    const minimumLoadingTime = firstLoadRef.current ? 620 : 0;
     setLoading(true);
     setLoadError('');
+    setNotificationVisible(false);
     try {
       const [nextContents, nextChain] = await Promise.all([fetchDirectory(currentFolderId), fetchFolderChain(currentFolderId)]);
       setContents(nextContents);
@@ -35,7 +48,11 @@ export default function App() {
       setContents(emptyContents);
       setFolderChain([]);
       setLoadError(error instanceof Error ? error.message : 'Could not load this directory.');
+      setNotificationVisible(true);
     } finally {
+      const remainingTime = minimumLoadingTime - (performance.now() - startedAt);
+      if (remainingTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingTime));
+      firstLoadRef.current = false;
       setLoading(false);
     }
   }, [currentFolderId]);
@@ -47,7 +64,20 @@ export default function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh, session?.user.id]);
+  useEffect(() => {
+    if (entryState === 'entered') void refresh();
+  }, [entryState, refresh, session?.user.id]);
+
+  useEffect(() => {
+    if (entryState === 'entered') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [entryState]);
+
+  useEffect(() => () => {
+    if (entryTimerRef.current !== null) window.clearTimeout(entryTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const onPopState = () => setCurrentFolderId(folderIdFromUrl());
@@ -61,10 +91,22 @@ export default function App() {
     setCurrentFolderId(id);
   }
 
+  function enterWorkspace() {
+    if (entryState !== 'welcome') return;
+    setEntryState('leaving');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    entryTimerRef.current = window.setTimeout(() => setEntryState('entered'), reducedMotion ? 0 : 460);
+  }
+
   const visibleEmail = useMemo(() => session?.user.email ?? 'Member', [session]);
 
   return (
-    <div className="site-shell">
+    <>
+    <div
+      aria-hidden={entryState !== 'entered' ? true : undefined}
+      className={`site-shell site-shell--${entryState}`}
+      inert={entryState !== 'entered'}
+    >
       <div className="ambient-background" aria-hidden="true">
         <span className="ambient-background__aurora" />
         <span className="ambient-background__beam" />
@@ -78,11 +120,7 @@ export default function App() {
         </nav>
       </header>
 
-      <main>
-        <section className="hero">
-          <div className="hero-copy"><p className="eyebrow"><span className="status-dot" /> Secure shared storage</p><h1>Your files, hosted<br />without the friction.</h1><p>Browse public downloads freely. Members can organize uploads and keep sensitive files private.</p></div>
-        </section>
-
+      <main className="workspace-main">
         {!isSupabaseConfigured ? <section className="setup-notice" aria-labelledby="setup-title"><span className="setup-notice__mark" aria-hidden="true">!</span><div><p className="eyebrow">Setup required</p><h2 id="setup-title">Connect this build to Supabase</h2><p>Copy <code>.env.example</code> to <code>.env.local</code>, add the project URL and publishable key, then apply the included migration.</p></div></section> : null}
 
         <nav className="breadcrumbs" aria-label="Breadcrumb">
@@ -90,9 +128,8 @@ export default function App() {
           {folderChain.map((folder) => <span key={folder.id}><span aria-hidden="true">/</span><button onClick={() => navigate(folder)} type="button">{folder.name}</button></span>)}
         </nav>
 
-        {loadError ? <p className="inline-alert" role="alert">{loadError}</p> : null}
         <div className={canAddHere ? 'content-grid' : 'content-grid content-grid--single'}>
-          <DirectoryList contents={contents} loading={loading} onChanged={refresh} onOpenFolder={navigate} user={session?.user ?? null} />
+          <DirectoryList contents={contents} failed={Boolean(loadError)} loading={loading} onChanged={refresh} onOpenFolder={navigate} user={session?.user ?? null} />
           {canAddHere && session ? <UploadPanel currentFolderId={currentFolderId} onChanged={refresh} user={session.user} /> : null}
         </div>
         {session && currentFolder && currentFolder.owner_id !== session.user.id ? <p className="visitor-note">You are viewing another member’s public folder. Only its owner can add items here.</p> : null}
@@ -105,5 +142,8 @@ export default function App() {
       </footer>
       {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} /> : null}
     </div>
+    {entryState !== 'entered' ? <WelcomeGate leaving={entryState === 'leaving'} onEnter={enterWorkspace} /> : null}
+    {notificationVisible ? <StatusToast onDismiss={() => setNotificationVisible(false)} onRetry={() => void refresh()} /> : null}
+    </>
   );
 }

@@ -9,6 +9,7 @@ import type { DirectoryContents, FileRecord, FolderRecord } from '../types';
 
 interface DirectoryListProps {
   contents: DirectoryContents;
+  failed: boolean;
   loading: boolean;
   onChanged: () => Promise<void>;
   onOpenFolder: (folder: FolderRecord) => void;
@@ -18,7 +19,7 @@ interface DirectoryListProps {
 type SortKey = 'name' | 'size' | 'date';
 type Item = { type: 'folder'; record: FolderRecord } | { type: 'file'; record: FileRecord };
 
-export function DirectoryList({ contents, loading, onChanged, onOpenFolder, user }: DirectoryListProps) {
+export function DirectoryList({ contents, failed, loading, onChanged, onOpenFolder, user }: DirectoryListProps) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
   const [downloadId, setDownloadId] = useState<string | null>(null);
@@ -63,12 +64,12 @@ export function DirectoryList({ contents, loading, onChanged, onOpenFolder, user
   }
 
   return (
-    <section className="directory-panel" aria-busy={loading} aria-labelledby="directory-heading">
+    <section className={`directory-panel${failed ? ' directory-panel--unavailable' : ''}`} aria-busy={loading} aria-labelledby="directory-heading">
       <div className="directory-toolbar">
         <div><p className="eyebrow">Shared index</p><h2 id="directory-heading">Files & folders</h2></div>
         <label className="search-field">
           <span className="sr-only">Search files and folders</span><Search aria-hidden="true" size={14} />
-          <input onChange={(event) => setQuery(event.target.value)} placeholder="Search this folder" type="search" value={query} />
+          <input disabled={loading || failed} onChange={(event) => setQuery(event.target.value)} placeholder="Search this folder" type="search" value={query} />
         </label>
       </div>
 
@@ -81,12 +82,12 @@ export function DirectoryList({ contents, loading, onChanged, onOpenFolder, user
           <span className="sr-only" role="columnheader">Action</span>
         </div>
 
-        {loading ? <DirectorySkeleton /> : null}
-        {!loading && items.length === 0 ? (
+        {loading || failed ? <DirectorySkeleton failed={failed} /> : null}
+        {!loading && !failed && items.length === 0 ? (
           <div className="empty-state"><span aria-hidden="true">∅</span><strong>{query ? 'No matching items' : 'This folder is empty'}</strong><p>{query ? 'Try a different search.' : 'Signed-in members can add the first item.'}</p></div>
         ) : null}
 
-        {!loading ? items.map((item) => {
+        {!loading && !failed ? items.map((item) => {
           const isFile = item.type === 'file';
           return (
             <div className="directory-row" key={`${item.type}-${item.record.id}`} role="row">
@@ -123,6 +124,22 @@ function SortButton({ active, direction, label, onClick }: { active: boolean; di
   return <button className="sort-button" onClick={onClick} role="columnheader" type="button">{label} <span aria-hidden="true">{active ? direction === 'asc' ? '↑' : '↓' : '↕'}</span></button>;
 }
 
-function DirectorySkeleton() {
-  return <>{[0, 1, 2].map((item) => <div className="directory-row skeleton-row" key={item}><span /><span /><span /></div>)}</>;
+function DirectorySkeleton({ failed }: { failed: boolean }) {
+  const widths = ['58%', '42%', '66%', '49%', '61%'];
+  return (
+    <div className={`directory-skeleton${failed ? ' directory-skeleton--failed' : ''}`} role="status">
+      <span className="sr-only">{failed ? 'The folder could not be loaded. Retry is available in the notification.' : 'Loading files and folders.'}</span>
+      {widths.map((width, index) => (
+        <div aria-hidden="true" className="directory-row skeleton-row" key={width + index}>
+          <span className="skeleton-cell skeleton-cell--name">
+            <span className="skeleton-block skeleton-block--icon" />
+            <span className="skeleton-block skeleton-block--line" style={{ width }} />
+          </span>
+          <span className="skeleton-block skeleton-cell skeleton-cell--size" />
+          <span className="skeleton-block skeleton-cell skeleton-cell--date" />
+          <span className="skeleton-block skeleton-cell skeleton-cell--action" />
+        </div>
+      ))}
+    </div>
+  );
 }
