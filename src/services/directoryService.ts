@@ -1,8 +1,8 @@
-import type { User } from '@supabase/supabase-js';
+import { FunctionsHttpError, type User } from '@supabase/supabase-js';
 
 import { formatBytes, sanitizeFileName } from '../lib/format';
 import { maxUploadBytes, storageBucket, supabase } from '../lib/supabase';
-import type { DirectoryContents, FileRecord, FolderRecord, Visibility } from '../types';
+import type { AppRole, DirectoryContents, FileRecord, FolderRecord, Visibility } from '../types';
 
 function client() {
   if (!supabase) throw new Error('Supabase is not configured.');
@@ -55,10 +55,7 @@ export async function createFolder(
   name: string,
   visibility: Visibility
 ): Promise<void> {
-  const normalizedName = name.normalize('NFKC').trim();
-  if (!normalizedName || normalizedName.length > 120 || /[\\/\u0000-\u001f\u007f]/.test(normalizedName)) {
-    throw new Error('Folder names must be 1–120 characters and cannot contain slashes.');
-  }
+  const normalizedName = normalizeFolderName(name);
 
   const { error } = await client().from('folders').insert({
     owner_id: user.id,
@@ -67,6 +64,42 @@ export async function createFolder(
     is_private: visibility === 'private'
   });
   if (error) throw error;
+}
+
+export async function renameFolder(
+  user: User,
+  role: AppRole,
+  folder: FolderRecord,
+  name: string
+): Promise<void> {
+  assertCanManageFolder(user, role, folder);
+  const normalizedName = normalizeFolderName(name);
+  const { data, error } = await client()
+    .from('folders')
+    .update({ name: normalizedName })
+    .eq('id', folder.id)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('This account cannot rename that folder.');
+}
+
+export async function deleteFolder(user: User, role: AppRole, folder: FolderRecord): Promise<void> {
+  assertCanManageFolder(user, role, folder);
+  const { data, error } = await client().functions.invoke('manage-folder', {
+    body: { folderId: folder.id }
+  });
+
+  if (error instanceof FunctionsHttpError) {
+    try {
+      const body = await error.context.clone().json();
+      if (typeof body?.error === 'string') throw new Error(body.error);
+    } catch (bodyError) {
+      if (bodyError instanceof Error && bodyError !== error) throw bodyError;
+    }
+  }
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error ?? 'Folder deletion failed.');
 }
 
 export async function uploadFile(
@@ -175,6 +208,23 @@ export async function deleteFile(user: User, file: FileRecord): Promise<void> {
 
 function assertFileOwner(user: User, file: FileRecord) {
   if (file.owner_id !== user.id) throw new Error('Only the file owner can perform this action.');
+}
+
+function assertCanManageFolder(user: User, role: AppRole, folder: FolderRecord) {
+  if (folder.is_private && folder.owner_id !== user.id) {
+    throw new Error('Private folders can only be managed by their owner.');
+  }
+  if (!folder.is_private && role !== 'owner' && role !== 'admin') {
+    throw new Error('Public folders can only be managed by an owner or admin.');
+  }
+}
+
+function normalizeFolderName(name: string) {
+  const normalizedName = name.normalize('NFKC').trim();
+  if (!normalizedName || normalizedName.length > 120 || /[\\/\u0000-\u001f\u007f]/.test(normalizedName)) {
+    throw new Error('Folder names must be 1–120 characters and cannot contain slashes.');
+  }
+  return normalizedName;
 }
 
 function validateFile(file: File) {

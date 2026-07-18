@@ -3,9 +3,10 @@ import type { User } from '@supabase/supabase-js';
 import { ArrowRight, Download, FileText, Folder, Search } from 'lucide-react';
 
 import { FileActions } from './FileActions';
+import { FolderActions } from './FolderActions';
 import { formatBytes, formatDate } from '../lib/format';
 import { downloadFile } from '../services/directoryService';
-import type { DirectoryContents, FileRecord, FolderRecord } from '../types';
+import type { AppRole, DirectoryContents, FileRecord, FolderRecord } from '../types';
 
 interface DirectoryListProps {
   contents: DirectoryContents;
@@ -13,13 +14,14 @@ interface DirectoryListProps {
   loading: boolean;
   onChanged: () => Promise<void>;
   onOpenFolder: (folder: FolderRecord) => void;
+  role: AppRole | null;
   user: User | null;
 }
 
 type SortKey = 'name' | 'size' | 'date';
 type Item = { type: 'folder'; record: FolderRecord } | { type: 'file'; record: FileRecord };
 
-export function DirectoryList({ contents, failed, loading, onChanged, onOpenFolder, user }: DirectoryListProps) {
+export function DirectoryList({ contents, failed, loading, onChanged, onOpenFolder, role, user }: DirectoryListProps) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
   const [downloadId, setDownloadId] = useState<string | null>(null);
@@ -103,6 +105,8 @@ export function DirectoryList({ contents, failed, loading, onChanged, onOpenFold
               <span className="date-cell" role="cell">{formatDate(itemDate(item))}</span>
               {isFile && user?.id === item.record.owner_id ? (
                 <FileActions file={item.record} onChanged={onChanged} user={user} />
+              ) : !isFile && user && role && canManageFolder(user.id, role, item.record) ? (
+                <FolderActions folder={item.record} onChanged={onChanged} onOpen={() => onOpenFolder(item.record)} role={role} user={user} />
               ) : (
                 <button aria-label={isFile ? `Download ${item.record.name}` : `Open ${item.record.name}`} className="row-action" disabled={downloadId === item.record.id} onClick={() => isFile ? void startDownload(item.record) : onOpenFolder(item.record)} type="button">
                   {downloadId === item.record.id ? '…' : isFile ? <Download size={15} /> : <ArrowRight size={15} />}
@@ -114,6 +118,10 @@ export function DirectoryList({ contents, failed, loading, onChanged, onOpenFold
       </div>
     </section>
   );
+}
+
+function canManageFolder(userId: string, role: AppRole, folder: FolderRecord) {
+  return folder.is_private ? folder.owner_id === userId : role === 'owner' || role === 'admin';
 }
 
 function itemDate(item: Item) {
