@@ -1,3 +1,5 @@
+@import url('view-transitions.css');
+
 :root {
   color-scheme: dark;
   --bg: #07060b;

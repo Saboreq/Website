@@ -1,0 +1,33 @@
+@view-transitions {
+  navigation: auto;
+}
+
+::view-transition-group(*) {
+  animation-duration: 1s;
+}
+
+::view-transition-old(root) {
+  animation: slide-out .5s ease forwards;
+}
+
+::view-transition-new(root) {
+  animation: slide-in .5s ease forwards;
+}
+
+@keyframes slide-out {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes slide-in {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
