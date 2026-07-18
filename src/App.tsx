@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { Session } from '@supabase/supabase-js';
 import { ArrowLeft, LayoutDashboard, LockKeyhole } from 'lucide-react';
 
@@ -18,6 +19,26 @@ const folderIdFromUrl = () => new URLSearchParams(window.location.search).get('f
 const routeFromUrl = () => window.location.pathname === '/dashboard' ? 'dashboard' : 'browser';
 type EntryState = 'welcome' | 'leaving' | 'entered';
 type Route = 'browser' | 'dashboard';
+type RouteTransitionDirection = 'forward' | 'back';
+
+let routeTransitionToken = 0;
+
+/* pushState route swaps never trigger the CSS `navigation: auto` opt-in, so
+   same-document transitions must be started here. The data attribute drives
+   the direction-aware rules in view-transitions.css. */
+function runRouteTransition(direction: RouteTransitionDirection, apply: () => void) {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion || typeof document.startViewTransition !== 'function') {
+    apply();
+    return;
+  }
+  const token = ++routeTransitionToken;
+  document.documentElement.dataset.routeTransition = direction;
+  const clear = () => {
+    if (token === routeTransitionToken) delete document.documentElement.dataset.routeTransition;
+  };
+  document.startViewTransition(() => flushSync(apply)).finished.then(clear, clear);
+}
 
 export default function App() {
   const initialRoute = routeFromUrl();
@@ -36,6 +57,8 @@ export default function App() {
   const [notificationVisible, setNotificationVisible] = useState(false);
   const entryTimerRef = useRef<number | null>(null);
   const firstLoadRef = useRef(true);
+  const routeRef = useRef(initialRoute);
+  routeRef.current = route;
 
   const currentFolder = folderChain.at(-1) ?? null;
   const privileged = profile?.role === 'owner' || profile?.role === 'admin';
@@ -126,9 +149,13 @@ export default function App() {
   useEffect(() => {
     const onPopState = () => {
       const nextRoute = routeFromUrl();
-      setRoute(nextRoute);
-      setCurrentFolderId(nextRoute === 'browser' ? folderIdFromUrl() : null);
-      if (nextRoute === 'browser') setEntryState('entered');
+      const apply = () => {
+        setRoute(nextRoute);
+        setCurrentFolderId(nextRoute === 'browser' ? folderIdFromUrl() : null);
+        if (nextRoute === 'browser') setEntryState('entered');
+      };
+      if (nextRoute === routeRef.current) apply();
+      else runRouteTransition(nextRoute === 'dashboard' ? 'forward' : 'back', apply);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -136,16 +163,23 @@ export default function App() {
 
   function navigate(folder: FolderRecord | null) {
     const id = folder?.id ?? null;
-    window.history.pushState({}, '', id ? `/?folder=${encodeURIComponent(id)}` : '/');
-    setRoute('browser');
-    setEntryState('entered');
-    setCurrentFolderId(id);
+    const apply = () => {
+      window.history.pushState({}, '', id ? `/?folder=${encodeURIComponent(id)}` : '/');
+      setRoute('browser');
+      setEntryState('entered');
+      setCurrentFolderId(id);
+    };
+    if (route === 'dashboard') runRouteTransition('back', apply);
+    else apply();
   }
 
   function navigateDashboard() {
-    window.history.pushState({}, '', '/dashboard');
-    setRoute('dashboard');
-    setCurrentFolderId(null);
+    if (route === 'dashboard') return;
+    runRouteTransition('forward', () => {
+      window.history.pushState({}, '', '/dashboard');
+      setRoute('dashboard');
+      setCurrentFolderId(null);
+    });
   }
 
   function enterWorkspace() {
