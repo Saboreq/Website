@@ -8,6 +8,7 @@ const lifecycleMigrationUrl = new URL('../supabase/migrations/202607170003_file_
 const folderPolicyMigrationUrl = new URL('../supabase/migrations/202607170004_fix_folder_insert_recursion.sql', import.meta.url);
 const administrationMigrationUrl = new URL('../supabase/migrations/202607170005_role_aware_administration.sql', import.meta.url);
 const roleSyncMigrationUrl = new URL('../supabase/migrations/202607170006_sync_profile_roles.sql', import.meta.url);
+const hardeningMigrationUrl = new URL('../supabase/migrations/202607200007_harden_folder_visibility_and_uploads.sql', import.meta.url);
 const functionUrl = new URL('../supabase/functions/register-with-invite/index.ts', import.meta.url);
 const folderFunctionUrl = new URL('../supabase/functions/manage-folder/index.ts', import.meta.url);
 
@@ -102,4 +103,21 @@ test('profile roles follow server-written auth metadata and owner role changes s
   assert.match(sql, /when requested_role = 'admin' then 'admin'/i);
   assert.match(sql, /update auth\.users[\s\S]*jsonb_build_object\('app_role', p_role\)/i);
   assert.match(sql, /private\.current_user_role\(\) <> 'owner'/i);
+});
+
+test('hardening migration requires ownership of every private ancestor', async () => {
+  const sql = await readFile(hardeningMigrationUrl, 'utf8');
+  assert.match(sql, /create or replace function private\.can_access_folder/i);
+  assert.match(sql, /bool_and\([\s\S]*when is_private then coalesce\(owner_id = p_user_id, false\)/i);
+  assert.doesNotMatch(sql, /bool_or\(owner_id = p_user_id\) or bool_and\(not is_private\)/i);
+  assert.match(sql, /create or replace function private\.can_manage_folder/i);
+  assert.match(sql, /folder_deletion_manifest[\s\S]*private\.can_manage_folder\(p_folder_id, p_actor_id\)/i);
+});
+
+test('hardening migration rejects Storage uploads without matching owner metadata', async () => {
+  const sql = await readFile(hardeningMigrationUrl, 'utf8');
+  assert.match(sql, /drop policy if exists "Members upload into their namespace"/i);
+  assert.match(sql, /create policy "Members upload reserved objects"/i);
+  assert.match(sql, /file\.storage_path = name/i);
+  assert.match(sql, /file\.owner_id = \(select auth\.uid\(\)\)/i);
 });

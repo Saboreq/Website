@@ -1,6 +1,17 @@
-# Filehaven
+# SabHaven
 
-Filehaven is an invite-only file portal built with React, Vite, and Supabase. Anyone can browse and download public items. Signed-in members can upload files, create private folders, replace their existing uploads, and remove their own content. Owner/admin accounts manage the public folder structure and invitation dashboard. Private items remain visible only to their actual owner—including from admins.
+SabHaven is an invite-only file delivery application for controlled public downloads and owner-only private storage. Visitors can browse public content without an account. Signed-in members can upload files, organise private folders, replace existing uploads, and remove their own content. Owner and admin roles manage the public structure and invitation dashboard without gaining access to another member's private files.
+
+**Live application:** [files.saboreq.xyz](https://files.saboreq.xyz)
+
+## Key capabilities
+
+- Public file browsing with short-lived download links
+- Invite-only accounts and role-based administration
+- Member uploads, virtual folders, replacement, and deletion
+- Owner-only privacy across complete folder trees
+- Server-side invitation, role, and destructive-action validation
+- Documented deployment, threat model, and known limitations
 
 ## Access model
 
@@ -11,21 +22,21 @@ Filehaven is an invite-only file portal built with React, Vite, and Supabase. An
 | Admin | Read/download | Read/manage | No | Public folders + own private folders | User invites only |
 | Owner | Read/download | Read/manage | No | Public folders + own private folders | Members + user/admin invites |
 
-These rules are enforced by Postgres and Storage row-level security (RLS), not only by the React interface. A public child inside a private parent remains private to the parent owner.
+These rules are enforced by Postgres and Storage row-level security, not only by the interface. Access checks evaluate the complete folder ancestry chain, so content inside a private folder remains private even when a descendant is marked public.
 
 ## Architecture
 
-- **Vercel** serves the static React app.
-- **Supabase Auth** signs members in with email/password.
-- **Postgres** stores virtual folders, file metadata, visibility, ownership, update timestamps, and hashed invite codes.
-- **Supabase Storage** stores objects in one private `downloads` bucket.
-- **RLS policies** expose public metadata to everyone and private metadata only to its owner. Storage follows the same policy before issuing a download.
-- **Signed URLs** expire after 60 seconds.
-- **`register-with-invite` Edge Function** validates and consumes invite codes with the service role. The service-role key never reaches the browser.
-- **`manage-folder` Edge Function** removes descendant Storage objects before cascading folder metadata deletion.
-- **Postgres profiles and role RPCs** keep owner/admin/user authority server-side. Invite plaintext is returned once and never stored.
+- **React and TypeScript** provide the responsive client application deployed on Vercel.
+- **Supabase Auth** manages member sessions.
+- **Postgres** stores virtual folders, file metadata, visibility, ownership, timestamps, roles, and hashed invite codes.
+- **Supabase Storage** stores objects in a private `downloads` bucket.
+- **Row-level security** applies the same access model to database rows and stored objects.
+- **Signed URLs** provide time-limited downloads and expire after 60 seconds.
+- **`register-with-invite`** validates and consumes invite codes without exposing privileged credentials to the browser.
+- **`manage-folder`** authenticates the caller, validates the complete folder chain, removes descendant objects, and deletes folder metadata.
+- **Reserved upload rules** require authorised metadata before an object can be created.
 
-See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage architecture and [ADR 002](docs/adr/002-role-aware-administration.md) for role boundaries. A portfolio-ready project description is available in [docs/PORTFOLIO_SUMMARY.md](docs/PORTFOLIO_SUMMARY.md).
+See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage design, [ADR 002](docs/adr/002-role-aware-administration.md) for role boundaries, and [SECURITY.md](SECURITY.md) for the threat model and known limitations.
 
 ## Local setup
 
@@ -36,7 +47,7 @@ See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage architectu
    npx supabase link --project-ref YOUR_PROJECT_REF
    ```
 
-2. Apply all migrations and deploy the Edge Functions:
+2. Apply the migrations and deploy the server functions:
 
    ```powershell
    npx supabase db push
@@ -44,9 +55,9 @@ See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage architectu
    npx supabase functions deploy manage-folder --no-verify-jwt
    ```
 
-   Database migrations and Edge Functions are separate from a Vercel deployment. Adding environment variables to Vercel does not perform either command.
+   Database migrations and server functions are separate from a Vercel deployment.
 
-3. In **Supabase Dashboard → Authentication → Sign In / Providers**, disable **Allow new users to sign up**. Existing users can still sign in, while registration remains available through the invite function only.
+3. In **Supabase Dashboard → Authentication → Sign In / Providers**, disable **Allow new users to sign up**. Registration remains available through the invitation flow.
 
 4. Allow the exact production browser origin:
 
@@ -54,7 +65,7 @@ See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage architectu
    npx supabase secrets set ALLOWED_ORIGIN=https://your-site.example
    ```
 
-5. Copy `.env.example` to `.env.local` and set the project URL and **publishable** key. Never put a secret/service-role key in a `VITE_` variable.
+5. Copy `.env.example` to `.env.local` and set the project URL and publishable key. Never place a secret or service-role key in a `VITE_` variable.
 
 6. Install and run:
 
@@ -63,13 +74,13 @@ See [ADR 001](docs/adr/001-supabase-file-platform.md) for the storage architectu
    npm run dev
    ```
 
-## Bootstrap owner and create invites
+## Bootstrap the first owner
 
 The role migration promotes the oldest existing Auth account to the single `owner` role. Verify that this is the intended account after the first migration.
 
-Afterward, the owner creates `user` or `admin` invites from `/dashboard`. Admins can access the same dashboard but can create only `user` invites. The generated code is displayed once; copy it before leaving the creation result.
+The owner can then create `user` or `admin` invitations from `/dashboard`. Admins can create only `user` invitations. Generated codes are displayed once and cannot be recovered from the database.
 
-For the very first account on a new installation, generate a long random code and run this legacy bootstrap helper in the Supabase SQL editor. Only the SHA-256 hash is stored.
+For the first account on a new installation, generate a long random code and run:
 
 ```sql
 select public.create_invite(
@@ -80,28 +91,28 @@ select public.create_invite(
 );
 ```
 
-Send the original code privately; it cannot be recovered from the database.
+Send the original code privately.
 
 ## Deploy to Vercel
 
-Set these Vercel environment variables for Production and Preview, then redeploy:
+Set these environment variables for Production and Preview, then redeploy:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `VITE_MAX_UPLOAD_BYTES` (optional; defaults to 50 MiB)
+- `VITE_MAX_UPLOAD_BYTES` — optional, defaults to 50 MiB
 
-`vercel.json` already routes virtual folder URLs to the single-page app.
+`vercel.json` routes virtual folder URLs to the single-page application.
 
 ## File lifecycle
 
-- Uploads reserve metadata before the object is stored; a failed upload removes the reservation.
-- Replace updates the existing Storage object and refreshes its size, MIME type, and `updated_at` value. Its displayed name, path, folder, owner, and visibility do not change.
-- Delete removes both the stored object and its metadata listing. Only the owner has permission for either operation.
-- Folder rename is column-scoped: private folders are owner-managed, while public folders require an owner/admin role.
-- Folder delete recursively removes stored descendants through the authenticated `manage-folder` function before deleting metadata.
-- The repository no longer contains or serves legacy binary files. All downloadable content comes from Supabase Storage.
+- Uploads reserve authorised metadata before an object is stored. Failed uploads remove their reservation.
+- Replacement updates the stored object and refreshes its size, MIME type, and update timestamp without changing its logical path or owner.
+- Deletion removes both the object and its metadata. Only the owner can perform either operation.
+- Folder privacy applies to the complete descendant tree.
+- Recursive folder deletion removes stored descendants before deleting metadata.
+- The repository does not contain downloadable user files; content is stored in Supabase Storage.
 
-## Quality commands
+## Quality checks
 
 ```powershell
 npm run typecheck
@@ -109,13 +120,15 @@ npm test
 npm run build
 ```
 
-## Security notes
+## Security scope
 
-- The bucket is private even for public files. Every download is authorized before a short-lived URL is issued.
-- Private metadata queries return only the signed-in user's own items; other members' private rows are filtered out by RLS.
-- Admin and owner roles do not bypass another member's private-folder boundary.
-- Folder privacy applies to descendants.
-- Registration checks and invite role assignment are server-side. Invites can expire, have a usage limit, or be disabled.
-- Keep `ALLOWED_ORIGIN` exact in production and add rate limiting or CAPTCHA if invite registration attracts abuse.
+- The Storage bucket remains private, including for publicly listed files.
+- Private metadata is returned only to its owner.
+- Admin and owner roles do not bypass another member's private boundary.
+- Invitation validation and role assignment are server-side.
+- Browser-origin restrictions complement, but do not replace, authentication and authorisation.
+- SabHaven is not end-to-end encrypted or independently audited and does not currently include malware scanning, per-user quotas, or distributed registration rate limiting.
 
-Developed by [Saboreq](https://saboreq.xyz).
+Review [SECURITY.md](SECURITY.md) before using SabHaven for sensitive or untrusted workloads.
+
+Created and maintained by the independent developer behind [Saboreq](https://saboreq.xyz), a public development brand.

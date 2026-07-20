@@ -21,9 +21,9 @@ export function WelcomeGate({ leaving, onEnter }: WelcomeGateProps) {
       tabIndex={-1}
     >
       <div className="welcome-gate__content">
-        <span className="welcome-gate__mark" aria-hidden="true">F</span>
-        <h1 id="welcome-title">Welcome to Filehaven</h1>
-        <p id="welcome-description">Public downloads for everyone. Private storage for members.</p>
+        <span className="welcome-gate__mark" aria-hidden="true">S/</span>
+        <h1 id="welcome-title">Welcome to SabHaven</h1>
+        <p id="welcome-description">Public downloads for everyone. Private storage for invited members.</p>
         <button className="welcome-gate__button" onClick={onEnter} type="button">
           <span>Browse files</span>
           <ArrowRight aria-hidden="true" size={17} strokeWidth={1.8} />

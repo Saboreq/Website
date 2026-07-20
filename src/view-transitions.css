@@ -1,0 +1,53 @@
+/* Same-document route transitions are driven from App.tsx via
+   document.startViewTransition(); the CSS-only `navigation: auto` opt-in below
+   only covers rare full-page loads (SPA route swaps never trigger it).
+   App.tsx stamps <html data-route-transition="forward|back"> for the duration
+   of the transition: forward = files -> dashboard, back = dashboard -> files. */
+
+@view-transition {
+  navigation: auto;
+}
+
+:root {
+  --vt-ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --vt-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Persistent chrome keeps its own snapshot so page content animates beneath a
+   stable frame; the fixed backdrop never drifts with the page. */
+.topbar { view-transition-name: chrome-topbar; }
+.site-shell > footer { view-transition-name: chrome-footer; }
+.ambient-background { view-transition-name: chrome-backdrop; }
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(chrome-topbar),
+  ::view-transition-group(chrome-footer) {
+    animation-duration: 460ms;
+    animation-timing-function: var(--vt-ease-spring);
+  }
+
+  ::view-transition-old(root) { animation: vt-fade-out 260ms var(--vt-ease-out) both; }
+  ::view-transition-new(root) { animation: vt-fade-in 420ms 30ms var(--vt-ease-spring) both; }
+
+  html[data-route-transition='forward']::view-transition-old(root) { animation-name: vt-out-up; }
+  html[data-route-transition='forward']::view-transition-new(root) { animation-name: vt-in-up; }
+
+  html[data-route-transition='back']::view-transition-old(root) { animation-name: vt-out-down; }
+  html[data-route-transition='back']::view-transition-new(root) { animation-name: vt-in-down; }
+}
+
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+@keyframes vt-out-up { to { opacity: 0; transform: translateY(-18px) scale(0.993); } }
+@keyframes vt-in-up { from { opacity: 0; transform: translateY(26px) scale(0.993); } }
+@keyframes vt-out-down { to { opacity: 0; transform: translateY(22px) scale(0.993); } }
+@keyframes vt-in-down { from { opacity: 0; transform: translateY(-26px) scale(0.993); } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

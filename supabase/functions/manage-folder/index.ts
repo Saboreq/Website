@@ -1,27 +1,60 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-const allowedOrigin = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
+const configuredOrigin = (Deno.env.get('ALLOWED_ORIGIN') ?? '').replace(/\/+$/, '');
 const corsBaseHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Vary': 'Origin'
 };
+const responseSecurityHeaders = {
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff'
+};
+
+function normalizedRequestOrigin(request: Request) {
+  return (request.headers.get('Origin') ?? '').replace(/\/+$/, '');
+}
+
+function isLocalOrigin(origin: string) {
+  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+function isAllowedOrigin(request: Request) {
+  const origin = normalizedRequestOrigin(request);
+  if (!origin) return true;
+  return isLocalOrigin(origin) || (Boolean(configuredOrigin) && origin === configuredOrigin);
+}
 
 function corsHeaders(request: Request) {
-  const origin = request.headers.get('Origin') ?? '';
-  const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  return { ...corsBaseHeaders, 'Access-Control-Allow-Origin': localOrigin ? origin : allowedOrigin };
+  const origin = normalizedRequestOrigin(request);
+  const allowedOrigin = isLocalOrigin(origin) ? origin : origin === configuredOrigin ? configuredOrigin : '';
+  return {
+    ...corsBaseHeaders,
+    ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin } : {})
+  };
 }
 
 function json(request: Request, body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
+    headers: {
+      ...corsHeaders(request),
+      ...responseSecurityHeaders,
+      'Content-Type': 'application/json'
+    }
   });
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(request) });
+  if (!isAllowedOrigin(request)) {
+    return new Response(JSON.stringify({ ok: false, error: 'Origin not allowed.' }), {
+      status: 403,
+      headers: { ...responseSecurityHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+  if (request.method === 'OPTIONS') {
+    return new Response('ok', { headers: { ...corsHeaders(request), ...responseSecurityHeaders } });
+  }
   if (request.method !== 'POST') return json(request, { ok: false, error: 'Method not allowed.' }, 405);
 
   try {
@@ -59,7 +92,19 @@ Deno.serve(async (request) => {
     });
     if (manifestError) {
       const forbidden = manifestError.code === '42501';
-      return json(request, { ok: false, error: forbidden ? 'You cannot delete this folder.' : 'Folder deletion could not be prepared.' }, forbidden ? 403 : 400);
+      const missing = manifestError.code === 'P0002';
+      return json(
+        request,
+        {
+          ok: false,
+          error: forbidden
+            ? 'You cannot delete this folder.'
+            : missing
+              ? 'Folder no longer exists.'
+              : 'Folder deletion could not be prepared.'
+        },
+        forbidden ? 403 : missing ? 404 : 400
+      );
     }
 
     const storagePaths = (manifest ?? [])
