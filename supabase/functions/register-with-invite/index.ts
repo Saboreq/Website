@@ -1,17 +1,22 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const allowedOrigin = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
-const corsHeaders = {
-  'Access-Control-Allow-Origin': allowedOrigin,
+const corsBaseHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Vary': 'Origin'
 };
 
-function json(body: Record<string, unknown>, status = 200) {
+function corsHeaders(request: Request) {
+  const origin = request.headers.get('Origin') ?? '';
+  const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  return { ...corsBaseHeaders, 'Access-Control-Allow-Origin': localOrigin ? origin : allowedOrigin };
+}
+
+function json(request: Request, body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
   });
 }
 
@@ -22,8 +27,8 @@ async function sha256(value: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(request) });
+  if (request.method !== 'POST') return json(request, { ok: false, error: 'Method not allowed.' }, 405);
 
   try {
     const { email, password, inviteCode } = await request.json();
@@ -31,7 +36,7 @@ Deno.serve(async (request) => {
     const normalizedCode = typeof inviteCode === 'string' ? inviteCode.trim() : '';
 
     if (!/^\S+@\S+\.\S+$/.test(normalizedEmail) || typeof password !== 'string' || password.length < 8 || password.length > 128 || normalizedCode.length < 10) {
-      return json({ ok: false, error: 'Check the email, password, and invite code.' }, 400);
+      return json(request, { ok: false, error: 'Check the email, password, and invite code.' }, 400);
     }
 
     const url = Deno.env.get('SUPABASE_URL');
@@ -43,7 +48,7 @@ Deno.serve(async (request) => {
 
     const { data: invite } = await admin
       .from('invites')
-      .select('id, use_count, max_uses')
+      .select('id, use_count, max_uses, target_role')
       .eq('code_hash', codeHash)
       .is('disabled_at', null)
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
@@ -51,29 +56,30 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (!invite || invite.use_count >= invite.max_uses) {
-      return json({ ok: false, error: 'This invite is invalid or no longer available.' }, 403);
+      return json(request, { ok: false, error: 'This invite is invalid or no longer available.' }, 403);
     }
 
     const { data: created, error: createError } = await admin.auth.admin.createUser({
       email: normalizedEmail,
       password,
-      email_confirm: true
+      email_confirm: true,
+      app_metadata: { app_role: invite.target_role }
     });
-    if (createError || !created.user) return json({ ok: false, error: 'Could not create this account.' }, 400);
+    if (createError || !created.user) return json(request, { ok: false, error: 'Could not create this account.' }, 400);
 
     const { data: consumed, error: consumeError } = await admin.rpc('consume_invite', {
       p_code_hash: codeHash,
       p_user_id: created.user.id
     });
 
-    if (consumeError || consumed !== true) {
+    if (consumeError || consumed !== invite.target_role) {
       await admin.auth.admin.deleteUser(created.user.id);
-      return json({ ok: false, error: 'This invite is invalid or no longer available.' }, 403);
+      return json(request, { ok: false, error: 'This invite is invalid or no longer available.' }, 403);
     }
 
-    return json({ ok: true }, 201);
+    return json(request, { ok: true, role: consumed }, 201);
   } catch (error) {
     console.error('register-with-invite failed', error instanceof Error ? error.message : error);
-    return json({ ok: false, error: 'Registration is temporarily unavailable.' }, 500);
+    return json(request, { ok: false, error: 'Registration is temporarily unavailable.' }, 500);
   }
 });
