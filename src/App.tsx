@@ -197,7 +197,7 @@ export default function App() {
       <div aria-hidden={shellLocked ? true : undefined} className={`site-shell site-shell--${entryState}`} inert={shellLocked}>
         <div className="ambient-background" aria-hidden="true"><span className="ambient-background__aurora" /><span className="ambient-background__beam" /><span className="ambient-background__grain" /></div>
         <header className="topbar">
-          <a className="brand" href="/" onClick={(event) => { event.preventDefault(); navigate(null); }}><span className="brand-mark" aria-hidden="true">F</span><span>Filehaven</span></a>
+          <a className="brand" href="/" onClick={(event) => { event.preventDefault(); navigate(null); }}><span className="brand-mark" aria-hidden="true">S/</span><span>SabHaven</span></a>
           <nav aria-label="Account">
             {session ? (
               <div className="account-actions">
@@ -228,7 +228,7 @@ export default function App() {
           </main>
         )}
 
-        <footer><span>Filehaven</span><span className="developer-credit">Developed by <a href="https://saboreq.xyz" rel="noreferrer" target="_blank">Saboreq</a></span><span>Short-lived links · Owner-only private access</span></footer>
+        <footer><span>SabHaven</span><span className="developer-credit">Developed by <a href="https://saboreq.xyz" rel="noreferrer" target="_blank">Saboreq</a></span><span>Short-lived links · Owner-only private access</span></footer>
         {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} /> : null}
       </div>
       {route === 'browser' && entryState !== 'entered' ? <WelcomeGate leaving={entryState === 'leaving'} onEnter={enterWorkspace} /> : null}
