@@ -131,4 +131,4 @@ npm run build
 
 Review [SECURITY.md](SECURITY.md) before using SabHaven for sensitive or untrusted workloads.
 
-Developed and maintained by [Saboreq](https://saboreq.xyz), a software development company.
+Created and maintained by the independent developer behind [Saboreq](https://saboreq.xyz), a public development brand.
